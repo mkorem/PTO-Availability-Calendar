@@ -11,7 +11,6 @@
     --text-primary:#1a1917;--text-secondary:#6b6860;--text-muted:#9e9c97;
     --green-bg:#eaf3de;--green-border:#c0dd97;--green-text:#3b6d11;--green-badge:#639922;
     --red-bg:#fcebeb;--red-border:#f7c1c1;--red-text:#a32d2d;--red-badge:#e24b4a;
-    /* Nuovi colori per lo stato Arancione (tra 4 e 8 ore) */
     --orange-bg:#fef3c7;--orange-border:#fde68a;--orange-text:#9a3412;--orange-badge:#ea580c;
     --blue-bg:#e6f1fb;--blue-text:#185fa5;
     --radius-md:8px;--radius-lg:12px;
@@ -107,12 +106,10 @@
       <button class="btn-icon" id="nextMonth"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></button>
     </div>
     <div class="legend">
-      <div class="legend">
       <div class="legend-item"><div class="legend-box" style="background:var(--green-bg);border:1px solid var(--green-border);"></div>Slots available</div>
       <div class="legend-item"><div class="legend-box" style="background:var(--orange-bg);border:1px solid var(--orange-border);"></div>Almost full (4-7 hours)</div>
       <div class="legend-item"><div class="legend-box" style="background:var(--red-bg);border:1px solid var(--red-border);"></div>No slots (0-3 hours)</div>
       <div class="legend-item"><div class="legend-box" style="background:var(--surface);border:1px solid var(--border-soft);"></div>No data</div>
-    </div>
     </div>
     <div id="calContainer"><p class="state-msg">Select a role to view the calendar.</p></div>
     <div class="footer-bar">
@@ -126,37 +123,44 @@
 var WEB_APP_URL="https://script.google.com/macros/s/AKfycbwTtOvE3GCYL5W4ZjcVdTQFey0aRA72Hh2HP97a36xRoX6Fn222N5jH5zr0iaVqE1hv/exec";
 var DAYS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+var MONTH_MAP = {"Jan":0,"Feb":1,"Mar":2,"Apr":3,"May":4,"Jun":5,"Jul":6,"Aug":7,"Sep":8,"Oct":9,"Nov":10,"Dec":11};
 var allData=[],currentDate=new Date(),selectedColIdx=null,isLoading=false;
-
-function parseDate(val){
-  if(!val)return null;
-  var str=String(val).trim();
-  if(str.indexOf("T")!==-1){
-    var dt=new Date(str);
-    if(!isNaN(dt.getTime())){
-      dt.setHours(dt.getHours() + 4);
-      return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
-    }
-  }
-  if(str.indexOf("/")!==-1){
-    var p=str.split("/");
-    if(p.length===3){
-      var m=parseInt(p[0],10)-1,d=parseInt(p[1],10),y=parseInt(p[2],10);
-      if(!isNaN(m)&&!isNaN(d)&&!isNaN(y))return new Date(y,m,d);
-    }
-  }
-  var fb=new Date(str);
-  return isNaN(fb.getTime())?null:fb;
-}
 
 function buildDataMap(colIdx){
   var map={};
-  for(var r=1;r<allData.length;r++){
-    var row=allData[r],dt=parseDate(row[0]);
-    if(!dt)continue;
-    var key=dt.getFullYear()+"-"+dt.getMonth()+"-"+dt.getDate();
-    var h=parseFloat(row[colIdx]);
-    map[key]=isNaN(h)?null:h;
+  if (allData.length < 2) return map;
+  
+  var runningDay = 1;
+  var currentTrackingMonth = null;
+  
+  for(var r=1; r<allData.length; r++){
+    var row=allData[r];
+    if(!row[0] || !row[1]) continue;
+    
+    // 1. Estraiamo l'anno letterale dai primi 4 caratteri "YYYY" della stringa ISO
+    var year = parseInt(String(row[0]).substring(0, 4), 10);
+    
+    // 2. Leggiamo il mese testuale reale direttamente dalla colonna B (es. "May")
+    var monthStr = String(row[1]).trim();
+    var month = MONTH_MAP[monthStr];
+    
+    if(isNaN(year) || month === undefined) continue;
+    
+    // Gestione del cambio mese sequenziale nelle righe del foglio
+    if (currentTrackingMonth !== month) {
+      currentTrackingMonth = month;
+      runningDay = 1; // Resetta il conteggio al giorno 1 quando cambia il mese nel foglio
+    } else {
+      // Se la riga precedente era uno sfasamento dell'ora ISO ma il mese testuale è lo stesso, incrementa
+      if (r > 1) {
+        runningDay++;
+      }
+    }
+    
+    // Creiamo la chiave legata al giorno REALE della griglia sequenziale
+    var key = year + "-" + month + "-" + runningDay;
+    var h = parseFloat(row[colIdx]);
+    map[key] = isNaN(h) ? null : h;
   }
   return map;
 }
@@ -165,34 +169,36 @@ function renderCalendar(){
   var container=document.getElementById("calContainer");
   if(selectedColIdx===null){container.innerHTML='<p class="state-msg">Select a role to view the calendar.</p>';return;}
   if(allData.length===0){container.innerHTML='<p class="state-msg">Loading data...</p>';return;}
+  
   var dataMap=buildDataMap(selectedColIdx);
   var year=currentDate.getFullYear(),month=currentDate.getMonth();
   document.getElementById("monthTitle").textContent=MONTHS[month]+" "+year;
+  
   var startDow=new Date(year,month,1).getDay();
   startDow=startDow===0?6:startDow-1;
   var daysInMonth=new Date(year,month+1,0).getDate();
   var today=new Date();
+  
   var html='<div class="cal-grid">';
   DAYS.forEach(function(d){html+='<div class="day-header">'+d+'</div>';});
-  for(var i=0;i<startDow;i++)html+='<div class="day-cell empty"></div>';
+  for(var i=0; i<startDow; i++) html+='<div class="day-cell empty"></div>';
+  
   for(var day=1;day<=daysInMonth;day++){
     var key=year+"-"+month+"-"+day;
     var hours=dataMap[key];
     var isToday=today.getFullYear()===year&&today.getMonth()===month&&today.getDate()===day;
     var cls="day-cell"+(isToday?" today":"");
     var inner="";
+    
     if(hours!==undefined&&hours!==null){
       var slots=Math.floor(hours/8); 
       if(slots>0){
-        // Verde (>= 8 ore disponibili)
         cls+=" available";
         inner='<span class="slots-badge">'+slots+'</span><span class="slots-label">slot'+(slots!==1?'s':'')+'</span>';
       }else{
-        // Se le ore sono >= 4 ma < 8, segna 0 slot ma diventa Arancione (warning)
         if(hours >= 4) {
           cls+=" warning";
         } else {
-          // Altrimenti sotto le 4 ore rimane Rosso (full)
           cls+=" full";
         }
         inner='<span class="slots-badge">0</span><span class="slots-label">slots</span>';
